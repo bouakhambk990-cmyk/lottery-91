@@ -1,0 +1,1098 @@
+<!doctype html>
+<html lang="lo">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CHAMPA LAIYVAN - Loan Management System</title>
+
+<!-- Tailwind CSS (Play CDN, compiles utility classes on the fly) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Babel Standalone: lets the browser run modern JSX directly, no build step needed -->
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+
+<!-- Import map: resolves bare "react", "lucide-react", "xlsx" imports to CDN ES modules -->
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?external=react",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react",
+    "xlsx": "https://esm.sh/xlsx@0.20.3"
+  }
+}
+</script>
+
+<style>
+  html, body { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createRoot } from "react-dom/client";
+import * as XLSX from "xlsx";
+import {
+  Shield, Users, Wallet, LogOut, Eye, EyeOff, Search,
+  Check, X, Loader2, Mail, Phone, Lock, User as UserIcon,
+  ArrowRight, ShieldCheck, Briefcase, ChevronRight, ChevronDown, AlertCircle,
+  FileText, CreditCard, Home, Landmark, Plus, Edit3, Clock, ThumbsUp, ThumbsDown, Banknote,
+  Calendar, Percent, TrendingDown, CheckCircle2, Circle,
+  Upload, Sparkles, Bell, MessageSquare, Smartphone, MessageCircle, Image as ImageIcon, Banknote as CashIcon,
+  Download, Table, Printer, Wallet2,
+} from "lucide-react";
+
+/* ---------- Design tokens ---------- */
+const C = {
+  ink: "#12213B", ink2: "#1B324F", river: "#1F5D74", gold: "#C99A2E", goldSoft: "#E7C871",
+  sand: "#F3EEE3", sandDeep: "#EAE2D2", white: "#FFFFFF", success: "#2F7A4F", danger: "#A8402A",
+  ink60: "rgba(18,33,59,0.6)", ink40: "rgba(18,33,59,0.4)",
+};
+
+const BRAND = "CHAMPA LAIYVAN";
+
+const FONT_IMPORT = `
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Lao:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+* { font-family: 'Noto Sans Lao','Noto Sans',sans-serif; }
+.font-mono-ui { font-family: 'JetBrains Mono','Noto Sans Lao',monospace; }
+@keyframes riseStep { from { transform: scaleY(0); opacity:0 } to { transform: scaleY(1); opacity:1 } }
+.step-bar { transform-origin: bottom; animation: riseStep 0.7s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes fadeUp { from { opacity:0; transform: translateY(8px);} to {opacity:1; transform: translateY(0);} }
+.fade-up { animation: fadeUp 0.5s ease forwards; }
+`;
+
+const ROLE_META = {
+  admin:    { label: "ຜູ້ດູແລລະບົບ",        icon: ShieldCheck, color: C.gold },
+  officer:  { label: "ພະນັກງານສິນເຊື່ອ",     icon: Briefcase,   color: C.river },
+  customer: { label: "ລູກຄ້າ/ຜູ້ກູ້",          icon: UserIcon,    color: C.success },
+};
+
+const STATUS_META = {
+  pending:   { label: "ລໍຖ້າກວດສອບ", color: C.gold,    icon: Clock },
+  approved:  { label: "ອະນຸມັດແລ້ວ", color: C.river,   icon: ThumbsUp },
+  rejected:  { label: "ປະຕິເສດ",     color: C.danger,  icon: ThumbsDown },
+  disbursed: { label: "ຈ່າຍເງິນແລ້ວ", color: C.success, icon: Banknote },
+};
+
+const INTEREST_TYPES = {
+  flat:      "ອັດຕາຄົງທີ່ (Flat Rate)",
+  effective: "ຫຼຸດຕົ້ນຫຼຸດດອກ (Effective Rate)",
+};
+
+const LATE_FEE_RATE = 0.03; // 3% ຕໍ່ 30 ວັນທີ່ຊ້າ
+
+const SEED_USERS = [
+  { id: "u_admin",    name: "ຄຳມະນີ ວົງສະຫວັນ",  contact: "admin@laoloan.la",    contactType: "email", password: "admin123",    role: "admin",    status: "active", createdAt: "2026-01-10", kyc: null },
+  { id: "u_officer",  name: "ບຸນມີ ພົມມະວົງ",     contact: "officer@laoloan.la",  contactType: "email", password: "officer123",  role: "officer",  status: "active", createdAt: "2026-02-03", kyc: null },
+  { id: "u_customer", name: "ສົມສີ ແກ້ວມະນີ",     contact: "020 5555 1234",       contactType: "phone", password: "customer123", role: "customer", status: "active", createdAt: "2026-03-18",
+    kyc: { idType: "ບັດປະຈຳຕົວ", idNumber: "23-081-00234", address: "ບ້ານໂພນສະຫວ່າງ, ນະຄອນຫຼວງວຽງຈັນ", occupation: "ຄ້າຂາຍ", collateral: "ລົດຈັກ Honda Wave 2022" } },
+];
+
+const SEED_APPLICATIONS = [
+  { id: "a_1001", customerId: "u_customer", customerName: "ສົມສີ ແກ້ວມະນີ", amount: 5000000, termMonths: 6, interestType: "effective", purpose: "ທຶນໝູນວຽນຄ້າຂາຍ", status: "disbursed", submittedAt: "2026-04-02", annualRate: 24, disbursedAt: "2026-04-05", paidCount: 2, reviewNote: "",
+    payments: [
+      { id: "p_1", installmentNo: 1, amount: 895000, method: "cash", date: "2026-05-05", reference: "", hasReceipt: false },
+      { id: "p_2", installmentNo: 2, amount: 878000, method: "transfer", date: "2026-06-06", reference: "BCEL-77213", hasReceipt: true },
+    ] },
+  { id: "a_1002", customerId: "u_customer", customerName: "ສົມສີ ແກ້ວມະນີ", amount: 3000000, termMonths: 12, interestType: "flat", purpose: "ສ້ອມແປງເຮືອນ", status: "pending", submittedAt: "2026-08-10", annualRate: null, disbursedAt: null, paidCount: 0, reviewNote: "", payments: [] },
+];
+
+/* ---------- Storage adapter ----------
+   Uses window.storage when available (Claude artifact environment).
+   Falls back to browser localStorage for a standalone deployment (e.g. hosted on your own server via GitHub). */
+const hasArtifactStorage = typeof window !== "undefined" && !!window.storage;
+
+const localAdapter = {
+  get: async (key, shared) => {
+    const k = (shared ? "shared:" : "personal:") + key;
+    const v = localStorage.getItem(k);
+    if (v === null) throw new Error("not found");
+    return { key, value: v, shared };
+  },
+  set: async (key, value, shared) => {
+    localStorage.setItem((shared ? "shared:" : "personal:") + key, value);
+    return { key, value, shared };
+  },
+  delete: async (key, shared) => {
+    localStorage.removeItem((shared ? "shared:" : "personal:") + key);
+    return { key, deleted: true, shared };
+  },
+};
+
+const storage = hasArtifactStorage ? window.storage : localAdapter;
+
+async function loadUsers() {
+  try { const res = await storage.get("users-db", true); if (res && res.value) return JSON.parse(res.value); } catch (e) {}
+  await storage.set("users-db", JSON.stringify(SEED_USERS), true);
+  return SEED_USERS;
+}
+async function saveUsers(list) { await storage.set("users-db", JSON.stringify(list), true); }
+
+async function loadApplications() {
+  try { const res = await storage.get("applications-db", true); if (res && res.value) return JSON.parse(res.value); } catch (e) {}
+  await storage.set("applications-db", JSON.stringify(SEED_APPLICATIONS), true);
+  return SEED_APPLICATIONS;
+}
+async function saveApplications(list) { await storage.set("applications-db", JSON.stringify(list), true); }
+
+async function loadSession() {
+  try { const res = await storage.get("session", false); if (res && res.value) return JSON.parse(res.value); } catch (e) {}
+  return null;
+}
+async function saveSession(userId) { await storage.set("session", JSON.stringify({ userId }), false); }
+async function clearSession() { try { await storage.delete("session", false); } catch (e) {} }
+
+const fmtKip = (n) => Math.round(Number(n || 0)).toLocaleString("en-US") + " ₭";
+
+/* ---------- Amortization calculation ---------- */
+function addMonths(dateStr, n) {
+  const d = new Date(dateStr);
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function generateSchedule({ amount, termMonths, interestType, annualRate, startDate }) {
+  const rows = [];
+  if (interestType === "flat") {
+    const totalInterest = amount * (annualRate / 100) * (termMonths / 12);
+    const interestPerPeriod = totalInterest / termMonths;
+    const principalPerPeriod = amount / termMonths;
+    let balance = amount;
+    for (let i = 1; i <= termMonths; i++) {
+      balance -= principalPerPeriod;
+      rows.push({ no: i, dueDate: addMonths(startDate, i), installment: principalPerPeriod + interestPerPeriod, principal: principalPerPeriod, interest: interestPerPeriod, balance: Math.max(balance, 0) });
+    }
+  } else {
+    const r = annualRate / 100 / 12;
+    const n = termMonths;
+    const emi = r === 0 ? amount / n : (amount * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    let bal = amount;
+    for (let i = 1; i <= n; i++) {
+      const interest = bal * r;
+      let principal = emi - interest;
+      if (i === n) principal = bal;
+      bal = Math.max(bal - principal, 0);
+      rows.push({ no: i, dueDate: addMonths(startDate, i), installment: principal + interest, principal, interest, balance: bal });
+    }
+  }
+  return rows;
+}
+
+function lateFeeFor(row, today) {
+  const due = new Date(row.dueDate);
+  if (today <= due) return 0;
+  const daysLate = Math.floor((today - due) / (1000 * 60 * 60 * 24));
+  const blocks = Math.ceil(daysLate / 30);
+  return row.installment * LATE_FEE_RATE * blocks;
+}
+
+/* ---------- Reports: financial overview + NPL + export ---------- */
+function nplBucket(daysLate) {
+  if (daysLate <= 15) return "1-15";
+  if (daysLate <= 30) return "16-30";
+  if (daysLate <= 60) return "31-60";
+  return "60+";
+}
+
+function buildLoanReportRows(applications) {
+  const today = new Date();
+  return applications.map((app) => {
+    const isDisbursed = app.status === "disbursed";
+    let outstanding = 0, daysLate = 0, bucket = "";
+    if (isDisbursed) {
+      const schedule = generateSchedule({ amount: app.amount, termMonths: app.termMonths, interestType: app.interestType, annualRate: app.annualRate, startDate: app.disbursedAt });
+      const idx = app.paidCount || 0;
+      outstanding = idx > 0 ? schedule[idx - 1].balance : app.amount;
+      const nextRow = schedule[idx];
+      if (nextRow) {
+        const due = new Date(nextRow.dueDate);
+        const diff = Math.floor((today - due) / (1000 * 60 * 60 * 24));
+        if (diff > 0) { daysLate = diff; bucket = nplBucket(diff); }
+      }
+    }
+    return {
+      "ລະຫັດ": app.id,
+      "ລູກຄ້າ": app.customerName,
+      "ຈຳນວນເງິນກູ້": app.amount,
+      "ໄລຍະເວລາ(ເດືອນ)": app.termMonths,
+      "ປະເພດດອກເບ້ຍ": INTEREST_TYPES[app.interestType] || "",
+      "ອັດຕາ%/ປີ": app.annualRate || "",
+      "ສະຖານະ": STATUS_META[app.status]?.label || app.status,
+      "ງວດທີ່ຈ່າຍແລ້ວ": app.paidCount || 0,
+      "ຍອດຄົງເຫຼືອ": Math.round(outstanding),
+      "ຄ້າງຊຳລະ(ວັນ)": daysLate,
+      "ກຸ່ມໜີ້ NPL": bucket,
+    };
+  });
+}
+
+function computeFinancials(applications) {
+  const today = new Date();
+  let totalDisbursed = 0, totalCollected = 0, outstanding = 0;
+  applications.forEach((app) => {
+    if (app.status !== "disbursed") return;
+    totalDisbursed += app.amount;
+    totalCollected += (app.payments || []).reduce((s, p) => s + p.amount, 0);
+    const schedule = generateSchedule({ amount: app.amount, termMonths: app.termMonths, interestType: app.interestType, annualRate: app.annualRate, startDate: app.disbursedAt });
+    const idx = app.paidCount || 0;
+    outstanding += idx > 0 ? schedule[idx - 1].balance : app.amount;
+  });
+  return { totalDisbursed, totalCollected, outstanding };
+}
+
+function computeNPLRows(applications) {
+  return buildLoanReportRows(applications).filter((r) => r["ກຸ່ມໜີ້ NPL"]);
+}
+
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(rows, filename) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [headers.map(escape).join(","), ...rows.map((r) => headers.map((h) => escape(r[h])).join(","))];
+  downloadBlob("\uFEFF" + lines.join("\r\n"), filename, "text/csv;charset=utf-8;");
+}
+
+function exportExcel(rows, filename) {
+  if (!rows.length) return;
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
+  XLSX.writeFile(wb, filename);
+}
+
+function printReport(rows, title) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const html = `<html><head><meta charset="utf-8"/><title>${title}</title><style>
+    body{font-family:'Noto Sans Lao','Noto Sans',sans-serif;padding:24px;color:#12213B;}
+    h1{font-size:16px;margin-bottom:12px;}
+    table{width:100%;border-collapse:collapse;font-size:11px;}
+    th,td{border:1px solid #D9D0BC;padding:6px 8px;text-align:left;}
+    th{background:#EAE2D2;}
+  </style></head><body>
+    <h1>${title}</h1>
+    <table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${headers.map((h) => `<td>${r[h] ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
+}
+
+/* ---------- Small UI atoms ---------- */
+function Field({ icon: Icon, ...props }) {
+  return (
+    <div className="relative">
+      {Icon && <Icon size={17} style={{ color: C.ink40 }} className="absolute left-3 top-1/2 -translate-y-1/2" />}
+      <input {...props} className={`w-full rounded-lg border py-2.5 text-sm outline-none transition ${Icon ? "pl-10 pr-3" : "px-3"}`} style={{ borderColor: "#D9D0BC", color: C.ink, background: C.white }}
+        onFocus={(e) => (e.target.style.borderColor = C.gold)} onBlur={(e) => (e.target.style.borderColor = "#D9D0BC")} />
+    </div>
+  );
+}
+function Select({ icon: Icon, children, ...props }) {
+  return (
+    <div className="relative">
+      {Icon && <Icon size={17} style={{ color: C.ink40 }} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
+      <select {...props} className={`w-full rounded-lg border py-2.5 text-sm outline-none appearance-none bg-white ${Icon ? "pl-10 pr-8" : "px-3 pr-8"}`} style={{ borderColor: "#D9D0BC", color: C.ink }}>
+        {children}
+      </select>
+      <ChevronDown size={15} style={{ color: C.ink40 }} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+    </div>
+  );
+}
+function Badge({ role }) {
+  const meta = ROLE_META[role]; const Icon = meta.icon;
+  return <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: `${meta.color}1A`, color: meta.color }}><Icon size={13} /> {meta.label}</span>;
+}
+function StatusBadge({ status }) {
+  const meta = STATUS_META[status]; const Icon = meta.icon;
+  return <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: `${meta.color}1A`, color: meta.color }}><Icon size={12} /> {meta.label}</span>;
+}
+
+function StaircaseMark({ compact }) {
+  const heights = [88, 70, 55, 42, 30, 20, 12];
+  const w = compact ? 18 : 26, gap = compact ? 6 : 9;
+  return (
+    <svg width={heights.length * (w + gap)} height="100" viewBox={`0 0 ${heights.length * (w + gap)} 100`}>
+      {heights.map((h, i) => <rect key={i} className="step-bar" style={{ animationDelay: `${i * 70}ms` }} x={i * (w + gap)} y={100 - h} width={w} height={h} rx={4} fill={i % 2 === 0 ? C.gold : C.goldSoft} />)}
+    </svg>
+  );
+}
+
+/* ---------- Auth screen ---------- */
+function AuthScreen({ users, onLogin, onRegister, error, setError, busy }) {
+  const [mode, setMode] = useState("login");
+  const [contactType, setContactType] = useState("email");
+  const [showPw, setShowPw] = useState(false);
+  const [form, setForm] = useState({ name: "", contact: "", password: "", confirm: "" });
+  const update = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = (e) => {
+    e.preventDefault(); setError("");
+    if (mode === "login") { onLogin(form.contact.trim(), form.password); }
+    else {
+      if (!form.name.trim()) return setError("ກະລຸນາປ້ອນຊື່ ແລະ ນາມສະກຸນ");
+      if (!form.contact.trim()) return setError(contactType === "email" ? "ກະລຸນາປ້ອນອີເມວ" : "ກະລຸນາປ້ອນເບີໂທ");
+      if (form.password.length < 6) return setError("ລະຫັດຜ່ານຕ້ອງມີຢ່າງໜ້ອຍ 6 ໂຕອັກສອນ");
+      if (form.password !== form.confirm) return setError("ລະຫັດຜ່ານບໍ່ກົງກັນ");
+      onRegister({ name: form.name.trim(), contact: form.contact.trim(), contactType, password: form.password });
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex" style={{ background: C.sand }}>
+      <div className="hidden md:flex md:w-[42%] flex-col justify-between p-10 relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${C.ink} 0%, ${C.ink2} 60%, ${C.river} 130%)` }}>
+        <div className="fade-up">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: C.gold }}><Wallet size={17} color={C.ink} /></div>
+            <span className="text-white font-bold tracking-wide text-lg">{BRAND}</span>
+          </div>
+          <p style={{ color: "rgba(255,255,255,0.55)" }} className="text-xs font-mono-ui ml-10">Loan Management System</p>
+        </div>
+        <div className="fade-up" style={{ animationDelay: "120ms" }}>
+          <StaircaseMark />
+          <h2 className="text-white text-2xl font-bold mt-6 leading-snug">ຄຸ້ມຄອງເງິນກູ້<br />ຢ່າງເປັນລະບົບ ແລະ ໂປ່ງໃສ</h2>
+          <p style={{ color: "rgba(255,255,255,0.6)" }} className="text-sm mt-3 max-w-xs leading-relaxed">ຈາກການສະໝັກກູ້ ຈົນເຖິງການຊຳລະງວດສຸດທ້າຍ — ທຸກຂັ້ນຕອນຢູ່ບ່ອນດຽວ, ແຍກສິດການນຳໃຊ້ຕາມບົດບາດ.</p>
+        </div>
+        <div className="flex gap-6 fade-up" style={{ animationDelay: "200ms" }}>
+          {Object.entries(ROLE_META).map(([key, m]) => (
+            <div key={key} className="flex items-center gap-1.5" style={{ color: "rgba(255,255,255,0.7)" }}><m.icon size={14} style={{ color: C.gold }} /><span className="text-xs">{m.label}</span></div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm fade-up">
+          <div className="md:hidden flex items-center gap-2 mb-8 justify-center">
+            <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: C.gold }}><Wallet size={16} color={C.ink} /></div>
+            <span style={{ color: C.ink }} className="font-bold text-lg">{BRAND}</span>
+          </div>
+          <div className="flex rounded-lg overflow-hidden mb-6 border" style={{ borderColor: "#D9D0BC" }}>
+            {["login", "register"].map((m) => (
+              <button key={m} onClick={() => { setMode(m); setError(""); }} className="flex-1 py-2.5 text-sm font-semibold transition" style={{ background: mode === m ? C.ink : C.white, color: mode === m ? C.white : C.ink60 }}>
+                {m === "login" ? "ເຂົ້າສູ່ລະບົບ" : "ລົງທະບຽນ"}
+              </button>
+            ))}
+          </div>
+          <form onSubmit={submit} className="space-y-3">
+            {mode === "register" && <Field icon={UserIcon} placeholder="ຊື່ ແລະ ນາມສະກຸນ" value={form.name} onChange={update("name")} />}
+            {mode === "register" && (
+              <div className="flex gap-2 text-xs mb-1">
+                {["email", "phone"].map((t) => (
+                  <button type="button" key={t} onClick={() => setContactType(t)} className="px-3 py-1.5 rounded-full font-semibold transition" style={{ background: contactType === t ? C.gold : C.sandDeep, color: contactType === t ? C.ink : C.ink60 }}>
+                    {t === "email" ? "ອີເມວ" : "ເບີໂທ"}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Field icon={mode === "register" ? (contactType === "email" ? Mail : Phone) : Mail} placeholder={mode === "login" ? "ອີເມວ ຫຼື ເບີໂທ" : contactType === "email" ? "example@email.com" : "020 xxxx xxxx"} value={form.contact} onChange={update("contact")} />
+            <div className="relative">
+              <Field icon={Lock} type={showPw ? "text" : "password"} placeholder="ລະຫັດຜ່ານ" value={form.password} onChange={update("password")} />
+              <button type="button" onClick={() => setShowPw((s) => !s)} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: C.ink40 }}>{showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
+            {mode === "register" && <Field icon={Lock} type={showPw ? "text" : "password"} placeholder="ຢືນຢັນລະຫັດຜ່ານ" value={form.confirm} onChange={update("confirm")} />}
+            {error && <div className="flex items-center gap-2 text-xs rounded-lg px-3 py-2" style={{ background: `${C.danger}14`, color: C.danger }}><AlertCircle size={14} /> {error}</div>}
+            <button type="submit" disabled={busy} className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-bold transition disabled:opacity-60" style={{ background: C.ink, color: C.white }}>
+              {busy ? <Loader2 size={16} className="animate-spin" /> : mode === "login" ? <ArrowRight size={16} /> : <Check size={16} />}
+              {mode === "login" ? "ເຂົ້າສູ່ລະບົບ" : "ສ້າງບັນຊີ"}
+            </button>
+          </form>
+          {mode === "login" && (
+            <>
+              <div className="flex items-center gap-3 my-4"><div className="h-px flex-1" style={{ background: "#D9D0BC" }} /><span className="text-xs" style={{ color: C.ink40 }}>ຫຼື</span><div className="h-px flex-1" style={{ background: "#D9D0BC" }} /></div>
+              <button onClick={() => onLogin("__google_demo__", "")} className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold border transition" style={{ borderColor: "#D9D0BC", color: C.ink }}>
+                <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.9 32.6 29.4 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.5 5.1 29.5 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.5 6.1 29.5 4 24 4c-7.7 0-14.3 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.3 0 10.2-2 13.8-5.3l-6.4-5.4C29.3 35 26.8 36 24 36c-5.4 0-9.9-3.4-11.6-8.2l-6.5 5C9.6 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1 3-3.2 5.4-6 6.9l6.4 5.4C39.8 37.1 45 31.4 45 24c0-1.4-.1-2.4-.4-3.5z"/></svg>
+                ເຂົ້າສູ່ລະບົບດ້ວຍ Google (ຕົວຢ່າງ)
+              </button>
+              <p className="text-[11px] mt-2 text-center" style={{ color: C.ink40 }}>* ໃນເວີຊັນນີ້ Google Auth ຖືກຈຳລອງໄວ້ເພື່ອສາທິດ</p>
+            </>
+          )}
+          {mode === "login" && (
+            <div className="mt-5 rounded-lg p-3 text-[11px] leading-relaxed font-mono-ui" style={{ background: C.sandDeep, color: C.ink60 }}>
+              <p className="font-semibold mb-1" style={{ color: C.ink }}>ບັນຊີທົດລອງ:</p>
+              admin@laoloan.la / admin123<br />officer@laoloan.la / officer123<br />020 5555 1234 / customer123
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Shared bits ---------- */
+function TopBar({ user, onLogout }) {
+  return (
+    <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: C.gold }}><Wallet size={14} color={C.ink} /></div>
+        <span className="font-bold" style={{ color: C.ink }}>{BRAND}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="text-right hidden sm:block"><p className="text-sm font-semibold" style={{ color: C.ink }}>{user.name}</p><Badge role={user.role} /></div>
+        <button onClick={onLogout} className="flex items-center gap-1.5 text-xs font-semibold rounded-lg px-3 py-2 border" style={{ borderColor: "#E4DCC9", color: C.danger }}><LogOut size={14} /> ອອກຈາກລະບົບ</button>
+      </div>
+    </div>
+  );
+}
+function ComingSoon({ items }) {
+  if (!items.length) return null;
+  return (
+    <div className="rounded-xl border p-5" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <p className="text-sm font-bold mb-3" style={{ color: C.ink }}>ໂມດູນຕໍ່ໄປ (ກຳລັງພັດທະນາ)</p>
+      <div className="space-y-2">
+        {items.map((it, i) => <div key={i} className="flex items-center justify-between text-sm rounded-lg px-3 py-2.5" style={{ background: C.sand }}><span style={{ color: C.ink60 }}>{it}</span><ChevronRight size={14} style={{ color: C.ink40 }} /></div>)}
+      </div>
+    </div>
+  );
+}
+function StatCard({ label, value, color, icon: Icon }) {
+  return (
+    <div className="rounded-xl border p-4 flex-1 min-w-[140px]" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <div className="flex items-center justify-between mb-2"><span className="text-xs font-semibold" style={{ color: C.ink60 }}>{label}</span><Icon size={15} style={{ color: color }} /></div>
+      <p className="text-2xl font-bold font-mono-ui" style={{ color: C.ink }}>{value}</p>
+    </div>
+  );
+}
+
+/* ---------- KYC form ---------- */
+function KycForm({ user, onSave }) {
+  const [editing, setEditing] = useState(!user.kyc);
+  const [f, setF] = useState(user.kyc || { idType: "ບັດປະຈຳຕົວ", idNumber: "", address: "", occupation: "", collateral: "" });
+  const update = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const submit = (e) => { e.preventDefault(); if (!f.idNumber.trim() || !f.address.trim()) return; onSave(f); setEditing(false); };
+
+  if (!editing) {
+    return (
+      <div className="rounded-xl border p-5" style={{ borderColor: "#E4DCC9", background: C.white }}>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-bold flex items-center gap-2" style={{ color: C.ink }}><CreditCard size={15} style={{ color: C.gold }} /> ຂໍ້ມູນ KYC</p>
+          <button onClick={() => setEditing(true)} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.river }}><Edit3 size={12} /> ແກ້ໄຂ</button>
+        </div>
+        <div className="text-sm space-y-1.5 font-mono-ui" style={{ color: C.ink60 }}>
+          <p>{f.idType}: <span style={{ color: C.ink }}>{f.idNumber}</span></p>
+          <p>ທີ່ຢູ່: <span style={{ color: C.ink }}>{f.address}</span></p>
+          <p>ອາຊີບ: <span style={{ color: C.ink }}>{f.occupation || "—"}</span></p>
+          <p>ຫຼັກຊັບປະກັນ: <span style={{ color: C.ink }}>{f.collateral || "—"}</span></p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="rounded-xl border p-5 space-y-3" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <p className="text-sm font-bold flex items-center gap-2" style={{ color: C.ink }}><CreditCard size={15} style={{ color: C.gold }} /> ຢືນຢັນຕົວຕົນ (KYC)</p>
+      <Select icon={FileText} value={f.idType} onChange={update("idType")}><option>ບັດປະຈຳຕົວ</option><option>ໜັງສືຜ່ານແດນ</option><option>ສຳມະໂນຄົວ</option></Select>
+      <Field icon={CreditCard} placeholder="ເລກທີເອກະສານ" value={f.idNumber} onChange={update("idNumber")} />
+      <Field icon={Home} placeholder="ທີ່ຢູ່ປັດຈຸບັນ" value={f.address} onChange={update("address")} />
+      <Field icon={Briefcase} placeholder="ອາຊີບ" value={f.occupation} onChange={update("occupation")} />
+      <Field icon={Landmark} placeholder="ຫຼັກຊັບປະກັນ (ຖ້າມີ)" value={f.collateral} onChange={update("collateral")} />
+      <button type="submit" className="w-full rounded-lg py-2.5 text-sm font-bold" style={{ background: C.ink, color: C.white }}>ບັນທຶກຂໍ້ມູນ KYC</button>
+    </form>
+  );
+}
+
+/* ---------- Loan application form ---------- */
+function LoanApplicationForm({ onSubmit, hasKyc }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ amount: "", termMonths: "12", interestType: "flat", purpose: "" });
+  const update = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const submit = (e) => {
+    e.preventDefault();
+    if (!f.amount || Number(f.amount) <= 0 || !f.purpose.trim()) return;
+    onSubmit({ amount: Number(f.amount), termMonths: Number(f.termMonths), interestType: f.interestType, purpose: f.purpose.trim() });
+    setF({ amount: "", termMonths: "12", interestType: "flat", purpose: "" });
+    setOpen(false);
+  };
+  if (!hasKyc) return <div className="rounded-xl border p-4 flex items-center gap-2 text-sm" style={{ borderColor: "#E4DCC9", background: `${C.gold}14`, color: C.ink }}><AlertCircle size={15} style={{ color: C.gold }} /> ກະລຸນາຕື່ມຂໍ້ມູນ KYC ໃຫ້ຄົບກ່ອນສົ່ງຄຳຮ້ອງກູ້ເງິນ</div>;
+  if (!open) return <button onClick={() => setOpen(true)} className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold border-2 border-dashed" style={{ borderColor: C.gold, color: C.ink }}><Plus size={16} /> ສົ່ງຄຳຮ້ອງກູ້ເງິນໃໝ່</button>;
+  return (
+    <form onSubmit={submit} className="rounded-xl border p-5 space-y-3" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <p className="text-sm font-bold" style={{ color: C.ink }}>ຄຳຮ້ອງກູ້ເງິນໃໝ່</p>
+      <Field type="number" min="0" placeholder="ຈຳນວນເງິນທີ່ຕ້ອງການກູ້ (ກີບ)" value={f.amount} onChange={update("amount")} />
+      <div className="grid grid-cols-2 gap-3">
+        <Select value={f.termMonths} onChange={update("termMonths")}>{[3, 6, 12, 18, 24, 36].map((m) => <option key={m} value={m}>{m} ເດືອນ</option>)}</Select>
+        <Select value={f.interestType} onChange={update("interestType")}><option value="flat">{INTEREST_TYPES.flat}</option><option value="effective">{INTEREST_TYPES.effective}</option></Select>
+      </div>
+      <Field placeholder="ຈຸດປະສົງການກູ້" value={f.purpose} onChange={update("purpose")} />
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-lg py-2.5 text-sm font-semibold border" style={{ borderColor: "#D9D0BC", color: C.ink60 }}>ຍົກເລີກ</button>
+        <button type="submit" className="flex-1 rounded-lg py-2.5 text-sm font-bold" style={{ background: C.ink, color: C.white }}>ສົ່ງຄຳຮ້ອງ</button>
+      </div>
+    </form>
+  );
+}
+
+/* ---------- Amortization table ---------- */
+function AmortizationTable({ app, editable, onOpenPayment }) {
+  const today = new Date();
+  const schedule = generateSchedule({ amount: app.amount, termMonths: app.termMonths, interestType: app.interestType, annualRate: app.annualRate, startDate: app.disbursedAt });
+  const paidCount = app.paidCount || 0;
+  const totalLateFee = schedule.reduce((sum, row, idx) => {
+    if (idx < paidCount) return sum;
+    return sum + lateFeeFor(row, today);
+  }, 0);
+  const nextIdx = paidCount < schedule.length ? paidCount : -1;
+  const payments = app.payments || [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-3 flex-wrap text-xs font-mono-ui">
+        <span className="rounded-lg px-2.5 py-1.5" style={{ background: C.sand, color: C.ink60 }}>ອັດຕາ: <b style={{ color: C.ink }}>{app.annualRate}%/ປີ</b></span>
+        <span className="rounded-lg px-2.5 py-1.5" style={{ background: C.sand, color: C.ink60 }}>ຈ່າຍແລ້ວ: <b style={{ color: C.success }}>{paidCount}/{schedule.length} ງວດ</b></span>
+        {totalLateFee > 0 && <span className="rounded-lg px-2.5 py-1.5" style={{ background: `${C.danger}1A`, color: C.danger }}>ຄ່າປັບໄໝລວມ: <b>{fmtKip(totalLateFee)}</b></span>}
+      </div>
+      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "#E4DCC9" }}>
+        <table className="w-full text-xs font-mono-ui" style={{ minWidth: 560 }}>
+          <thead>
+            <tr style={{ background: C.sandDeep, color: C.ink }}>
+              <th className="text-left px-3 py-2">ງວດ</th>
+              <th className="text-left px-3 py-2">ວັນຄົບກຳນົດ</th>
+              <th className="text-right px-3 py-2">ຄ່າງວດ</th>
+              <th className="text-right px-3 py-2">ເງິນຕົ້ນ</th>
+              <th className="text-right px-3 py-2">ດອກເບ້ຍ</th>
+              <th className="text-right px-3 py-2">ຍອດຄົງເຫຼືອ</th>
+              <th className="text-left px-3 py-2">ສະຖານະ</th>
+              {editable && <th className="px-3 py-2"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {schedule.map((row, idx) => {
+              const paid = idx < paidCount;
+              const fee = paid ? 0 : lateFeeFor(row, today);
+              const overdue = !paid && fee > 0;
+              const isNext = idx === nextIdx;
+              return (
+                <tr key={row.no} style={{ borderTop: "1px solid #EFE9DB", background: isNext ? `${C.gold}0D` : "transparent" }}>
+                  <td className="px-3 py-2" style={{ color: C.ink }}>{row.no}</td>
+                  <td className="px-3 py-2" style={{ color: C.ink60 }}>{row.dueDate}</td>
+                  <td className="px-3 py-2 text-right" style={{ color: C.ink }}>{fmtKip(row.installment)}</td>
+                  <td className="px-3 py-2 text-right" style={{ color: C.ink60 }}>{fmtKip(row.principal)}</td>
+                  <td className="px-3 py-2 text-right" style={{ color: C.ink60 }}>{fmtKip(row.interest)}</td>
+                  <td className="px-3 py-2 text-right" style={{ color: C.ink60 }}>{fmtKip(row.balance)}</td>
+                  <td className="px-3 py-2">
+                    {paid ? (
+                      <span className="inline-flex items-center gap-1" style={{ color: C.success }}><CheckCircle2 size={12} /> ຈ່າຍແລ້ວ</span>
+                    ) : overdue ? (
+                      <span className="inline-flex items-center gap-1" style={{ color: C.danger }}><AlertCircle size={12} /> ຄ້າງ +{fmtKip(fee)}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1" style={{ color: C.ink40 }}><Circle size={12} /> {isNext ? "ງວດຕໍ່ໄປ" : "ລໍຖ້າ"}</span>
+                    )}
+                  </td>
+                  {editable && <td className="px-3 py-2">{!paid && isNext && <button onClick={() => onOpenPayment(app)} className="text-[11px] font-semibold rounded-md px-2 py-1" style={{ background: C.ink, color: C.white }}>ບັນທຶກຊຳລະ</button>}</td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {payments.length > 0 && (
+        <div>
+          <p className="text-xs font-bold mb-1.5" style={{ color: C.ink }}>ປະຫວັດການຊຳລະ</p>
+          <div className="space-y-1.5">
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs font-mono-ui rounded-lg px-3 py-2" style={{ background: C.sand }}>
+                <span className="flex items-center gap-1.5" style={{ color: C.ink }}>
+                  {p.method === "cash" ? <CashIcon size={12} style={{ color: C.success }} /> : <Landmark size={12} style={{ color: C.river }} />}
+                  ງວດ {p.installmentNo} · {fmtKip(p.amount)}
+                </span>
+                <span style={{ color: C.ink60 }}>{p.date}{p.hasReceipt && <ImageIcon size={11} className="inline ml-1.5" style={{ color: C.ink40 }} />}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Payment recording modal (with simulated OCR) ---------- */
+function PaymentModal({ app, onClose, onRecord }) {
+  const today = new Date();
+  const schedule = generateSchedule({ amount: app.amount, termMonths: app.termMonths, interestType: app.interestType, annualRate: app.annualRate, startDate: app.disbursedAt });
+  const nextIdx = app.paidCount || 0;
+  const row = schedule[nextIdx];
+  const fee = row ? lateFeeFor(row, today) : 0;
+  const defaultAmount = row ? Math.round(row.installment + fee) : 0;
+
+  const [method, setMethod] = useState("transfer");
+  const [amount, setAmount] = useState(String(defaultAmount));
+  const [date, setDate] = useState(today.toISOString().slice(0, 10));
+  const [reference, setReference] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrDone, setOcrDone] = useState(false);
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setOcrDone(false);
+  };
+
+  const runOcr = () => {
+    setOcrLoading(true);
+    setTimeout(() => {
+      setAmount(String(defaultAmount));
+      setDate(today.toISOString().slice(0, 10));
+      setReference("BCEL-" + Math.floor(10000 + Math.random() * 89999));
+      setOcrLoading(false);
+      setOcrDone(true);
+    }, 1200);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!amount || Number(amount) <= 0) return;
+    onRecord(app.id, { id: "p_" + Date.now(), installmentNo: (row?.no) || nextIdx + 1, amount: Number(amount), method, date, reference, hasReceipt: !!fileName });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(18,33,59,0.5)" }}>
+      <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: C.white }}>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold" style={{ color: C.ink }}>ບັນທຶກການຊຳລະ · ງວດ {row?.no}</p>
+          <button type="button" onClick={onClose} style={{ color: C.ink40 }}><X size={18} /></button>
+        </div>
+
+        <div className="flex gap-2">
+          {[{ k: "cash", label: "ເງິນສົດ", icon: CashIcon }, { k: "transfer", label: "ໂອນທະນາຄານ", icon: Landmark }].map((m) => (
+            <button type="button" key={m.k} onClick={() => setMethod(m.k)} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold" style={{ background: method === m.k ? C.ink : C.sandDeep, color: method === m.k ? C.white : C.ink60 }}>
+              <m.icon size={13} /> {m.label}
+            </button>
+          ))}
+        </div>
+
+        {method === "transfer" && (
+          <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "#E4DCC9", background: C.sand }}>
+            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: C.ink }}>
+              <Upload size={14} style={{ color: C.river }} /> {fileName || "ແນບຮູບສລິບການໂອນເງິນ"}
+              <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            </label>
+            {fileName && !ocrDone && (
+              <button type="button" onClick={runOcr} disabled={ocrLoading} className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold rounded-lg py-2" style={{ background: `${C.river}1A`, color: C.river }}>
+                {ocrLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                {ocrLoading ? "ກຳລັງອ່ານຂໍ້ມູນຈາກສລິບ..." : "ອ່ານຂໍ້ມູນອັດຕະໂນມັດ (OCR)"}
+              </button>
+            )}
+            {ocrDone && <p className="text-[11px] flex items-center gap-1" style={{ color: C.success }}><CheckCircle2 size={12} /> ອ່ານຂໍ້ມູນສຳເລັດ ແລະ ຕື່ມໃສ່ຟອມແລ້ວ (ຈຳລອງ OCR)</p>}
+          </div>
+        )}
+
+        <Field type="number" min="0" placeholder="ຈຳນວນເງິນ" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <Field type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        {method === "transfer" && <Field placeholder="ເລກທີ່ອ້າງອີງ (Ref)" value={reference} onChange={(e) => setReference(e.target.value)} />}
+        {fee > 0 && <p className="text-[11px]" style={{ color: C.danger }}>* ລວມຄ່າປັບໄໝຊຳລະຊ້າ {fmtKip(fee)} ແລ້ວ</p>}
+
+        <button type="submit" className="w-full rounded-lg py-2.5 text-sm font-bold" style={{ background: C.ink, color: C.white }}>ບັນທຶກການຊຳລະ</button>
+        <p className="text-[10px] leading-relaxed" style={{ color: C.ink40 }}>* OCR ໃນເວີຊັນນີ້ຖືກຈຳລອງໄວ້ເພື່ອສາທິດ UX, ຂອງຈິງຕ້ອງເຊື່ອມ OCR API</p>
+      </form>
+    </div>
+  );
+}
+
+/* ---------- Notifications ---------- */
+function computeNotifications(applications) {
+  const today = new Date();
+  const notifs = [];
+  applications.filter((a) => a.status === "disbursed").forEach((app) => {
+    const schedule = generateSchedule({ amount: app.amount, termMonths: app.termMonths, interestType: app.interestType, annualRate: app.annualRate, startDate: app.disbursedAt });
+    const idx = app.paidCount || 0;
+    const row = schedule[idx];
+    if (!row) return;
+    const due = new Date(row.dueDate);
+    const daysDiff = Math.round((due - today) / (1000 * 60 * 60 * 24));
+    if (daysDiff < 0) notifs.push({ appId: app.id, customerName: app.customerName, dueDate: row.dueDate, installmentNo: row.no, amount: row.installment, kind: "overdue", daysLate: -daysDiff });
+    else if (daysDiff <= 3) notifs.push({ appId: app.id, customerName: app.customerName, dueDate: row.dueDate, installmentNo: row.no, amount: row.installment, kind: "upcoming", daysLeft: daysDiff });
+  });
+  return notifs.sort((a, b) => (a.kind === "overdue" ? -1 : 1));
+}
+
+function NotificationsPanel({ applications }) {
+  const notifs = computeNotifications(applications);
+  const [sent, setSent] = useState([]);
+  if (notifs.length === 0) return (
+    <div className="rounded-xl border p-5 flex items-center gap-2 text-sm" style={{ borderColor: "#E4DCC9", background: C.white, color: C.ink60 }}>
+      <Bell size={15} style={{ color: C.success }} /> ບໍ່ມີການແຈ້ງເຕືອນຄ້າງໄວ້
+    </div>
+  );
+  return (
+    <div className="rounded-xl border p-5" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <p className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: C.ink }}><Bell size={15} style={{ color: C.gold }} /> ການແຈ້ງເຕືອນລູກຄ້າ</p>
+      <div className="space-y-2">
+        {notifs.map((n, i) => {
+          const key = n.appId + n.installmentNo;
+          const isSent = sent.includes(key);
+          const overdue = n.kind === "overdue";
+          return (
+            <div key={key} className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 flex-wrap" style={{ background: overdue ? `${C.danger}0D` : `${C.gold}0D` }}>
+              <div>
+                <p className="text-xs font-semibold" style={{ color: C.ink }}>{n.customerName} · ງວດ {n.installmentNo}</p>
+                <p className="text-[11px]" style={{ color: overdue ? C.danger : C.ink60 }}>
+                  {overdue ? `ຄ້າງຊຳລະ ${n.daysLate} ວັນ · ${fmtKip(n.amount)}` : `ຄົບກຳນົດອີກ ${n.daysLeft} ວັນ · ${fmtKip(n.amount)}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1" style={{ color: C.ink40 }}>
+                  <Smartphone size={13} title="App" />
+                  {overdue && <MessageSquare size={13} title="SMS" />}
+                </div>
+                <button
+                  onClick={() => setSent((s) => [...s, key])}
+                  disabled={isSent}
+                  className="text-[11px] font-semibold rounded-md px-2.5 py-1.5"
+                  style={{ background: isSent ? `${C.success}1A` : C.ink, color: isSent ? C.success : C.white }}
+                >
+                  {isSent ? "✓ ສົ່ງແລ້ວ" : "ສົ່ງແຈ້ງເຕືອນ"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] mt-3" style={{ color: C.ink40 }}>* ການສົ່ງແຈ້ງເຕືອນຖືກຈຳລອງໄວ້ — ຂອງຈິງເຊື່ອມ SMS/LINE/WhatsApp gateway</p>
+    </div>
+  );
+}
+
+/* ---------- Approve panel (rate input) ---------- */
+function ApprovalRateForm({ onApprove }) {
+  const [rate, setRate] = useState("18");
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="relative w-28">
+        <Percent size={13} style={{ color: C.ink40 }} className="absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <input type="number" min="0" step="0.1" value={rate} onChange={(e) => setRate(e.target.value)} className="w-full rounded-lg border pl-7 pr-2 py-1.5 text-xs outline-none" style={{ borderColor: "#D9D0BC", color: C.ink }} />
+      </div>
+      <button onClick={() => onApprove(Number(rate))} className="text-xs font-semibold rounded-lg px-3 py-1.5 flex items-center gap-1" style={{ background: `${C.river}1A`, color: C.river }}><ThumbsUp size={12} /> ອະນຸມັດ (ອັດຕາ/ປີ)</button>
+    </div>
+  );
+}
+
+function ApplicationCard({ app, expandable = true, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#E4DCC9", background: C.white }}>
+      <button onClick={() => expandable && setOpen((o) => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+        <div>
+          <p className="text-sm font-bold font-mono-ui" style={{ color: C.ink }}>{fmtKip(app.amount)} · {app.termMonths} ເດືອນ</p>
+          <p className="text-xs mt-0.5" style={{ color: C.ink60 }}>{app.purpose} · {app.submittedAt}</p>
+          {app.customerName && <p className="text-xs mt-0.5" style={{ color: C.ink40 }}>{app.customerName}</p>}
+        </div>
+        <div className="flex items-center gap-2"><StatusBadge status={app.status} />{expandable && <ChevronDown size={15} style={{ color: C.ink40, transform: open ? "rotate(180deg)" : "none" }} />}</div>
+      </button>
+      {expandable && open && <div className="px-4 pb-4 border-t pt-3" style={{ borderColor: "#EFE9DB" }}>{children}</div>}
+    </div>
+  );
+}
+
+/* ---------- Officer applications queue ---------- */
+function ApplicationsQueue({ applications, users, onUpdateApp, onOpenPayment }) {
+  const [filter, setFilter] = useState("all");
+  const filtered = applications.filter((a) => filter === "all" || a.status === filter);
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2 flex-wrap">
+        {["all", "pending", "approved", "rejected", "disbursed"].map((s) => (
+          <button key={s} onClick={() => setFilter(s)} className="text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: filter === s ? C.ink : C.sandDeep, color: filter === s ? C.white : C.ink60 }}>{s === "all" ? "ທັງໝົດ" : STATUS_META[s].label}</button>
+        ))}
+      </div>
+      {filtered.length === 0 && <p className="text-sm text-center py-6" style={{ color: C.ink40 }}>ບໍ່ມີຄຳຮ້ອງ</p>}
+      {filtered.map((app) => {
+        const cust = users.find((u) => u.id === app.customerId);
+        return (
+          <ApplicationCard key={app.id} app={app}>
+            {cust?.kyc ? (
+              <div className="text-xs font-mono-ui space-y-1 mb-3" style={{ color: C.ink60 }}>
+                <p>{cust.kyc.idType}: <span style={{ color: C.ink }}>{cust.kyc.idNumber}</span></p>
+                <p>ທີ່ຢູ່: <span style={{ color: C.ink }}>{cust.kyc.address}</span></p>
+                <p>ອາຊີບ: <span style={{ color: C.ink }}>{cust.kyc.occupation || "—"}</span></p>
+                <p>ຫຼັກຊັບປະກັນ: <span style={{ color: C.ink }}>{cust.kyc.collateral || "—"}</span></p>
+                <p>ປະເພດດອກເບ້ຍ: <span style={{ color: C.ink }}>{INTEREST_TYPES[app.interestType]}</span></p>
+              </div>
+            ) : <p className="text-xs mb-3" style={{ color: C.danger }}>ບໍ່ມີຂໍ້ມູນ KYC</p>}
+
+            {app.status === "pending" && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <ApprovalRateForm onApprove={(rate) => onUpdateApp(app.id, { status: "approved", annualRate: rate })} />
+                <button onClick={() => onUpdateApp(app.id, { status: "rejected" })} className="text-xs font-semibold rounded-lg px-3 py-1.5 flex items-center gap-1" style={{ background: `${C.danger}1A`, color: C.danger }}><ThumbsDown size={12} /> ປະຕິເສດ</button>
+              </div>
+            )}
+            {app.status === "approved" && (
+              <button onClick={() => onUpdateApp(app.id, { status: "disbursed", disbursedAt: new Date().toISOString().slice(0, 10) })} className="text-xs font-semibold rounded-lg px-3 py-1.5 flex items-center gap-1" style={{ background: `${C.success}1A`, color: C.success }}><Banknote size={12} /> ຈ່າຍເງິນກູ້ (ອັດຕາ {app.annualRate}%/ປີ)</button>
+            )}
+            {app.status === "disbursed" && <AmortizationTable app={app} editable onOpenPayment={onOpenPayment} />}
+          </ApplicationCard>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- Reports section (financial overview + NPL + export) ---------- */
+function ExportButtons({ rows, filenameBase, label }) {
+  const disabled = !rows.length;
+  return (
+    <div className="flex gap-2 flex-wrap">
+      <button disabled={disabled} onClick={() => exportCSV(rows, `${filenameBase}.csv`)} className="text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-1.5 disabled:opacity-40" style={{ background: C.sandDeep, color: C.ink }}><Download size={13} /> CSV</button>
+      <button disabled={disabled} onClick={() => exportExcel(rows, `${filenameBase}.xlsx`)} className="text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-1.5 disabled:opacity-40" style={{ background: C.sandDeep, color: C.ink }}><Table size={13} /> Excel</button>
+      <button disabled={disabled} onClick={() => printReport(rows, label)} className="text-xs font-semibold rounded-lg px-3 py-2 flex items-center gap-1.5 disabled:opacity-40" style={{ background: C.sandDeep, color: C.ink }}><Printer size={13} /> PDF</button>
+    </div>
+  );
+}
+
+function ReportsSection({ applications }) {
+  const [bucket, setBucket] = useState("all");
+  const fin = computeFinancials(applications);
+  const nplAll = computeNPLRows(applications);
+  const npl = bucket === "all" ? nplAll : nplAll.filter((r) => r["ກຸ່ມໜີ້ NPL"] === bucket);
+  const allRows = buildLoanReportRows(applications);
+  const bucketColor = { "1-15": C.gold, "16-30": "#C97A2E", "31-60": C.danger, "60+": "#7A2020" };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: C.ink }}><Wallet2 size={15} style={{ color: C.gold }} /> ພາບລວມການເງິນ</p>
+        <div className="flex gap-3 flex-wrap">
+          <StatCard label="ຍອດປ່ອຍກູ້ທັງໝົດ" value={fmtKip(fin.totalDisbursed)} color={C.river} icon={Banknote} />
+          <StatCard label="ຍອດເກັບໄດ້" value={fmtKip(fin.totalCollected)} color={C.success} icon={FileText} />
+          <StatCard label="ຍອດຄົງຄ້າງ" value={fmtKip(fin.outstanding)} color={C.danger} icon={TrendingDown} />
+        </div>
+      </div>
+
+      <div className="rounded-xl border p-5" style={{ borderColor: "#E4DCC9", background: C.white }}>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <p className="text-sm font-bold flex items-center gap-2" style={{ color: C.ink }}><AlertCircle size={15} style={{ color: C.danger }} /> ລາຍງານໜີ້ເກີນກຳນົດ (NPL)</p>
+          <ExportButtons rows={npl} filenameBase="npl-report" label="ລາຍງານໜີ້ເກີນກຳນົດ NPL" />
+        </div>
+        <div className="flex gap-2 flex-wrap mb-3">
+          {["all", "1-15", "16-30", "31-60", "60+"].map((b) => (
+            <button key={b} onClick={() => setBucket(b)} className="text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: bucket === b ? C.ink : C.sandDeep, color: bucket === b ? C.white : C.ink60 }}>{b === "all" ? "ທັງໝົດ" : `${b} ວັນ`}</button>
+          ))}
+        </div>
+        {npl.length === 0 ? (
+          <p className="text-sm text-center py-6" style={{ color: C.ink40 }}>ບໍ່ມີໜີ້ເກີນກຳນົດໃນກຸ່ມນີ້</p>
+        ) : (
+          <div className="space-y-2">
+            {npl.map((r) => (
+              <div key={r["ລະຫັດ"]} className="flex items-center justify-between rounded-lg px-3 py-2.5 flex-wrap gap-2" style={{ background: C.sand }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.ink }}>{r["ລູກຄ້າ"]}</p>
+                  <p className="text-xs font-mono-ui" style={{ color: C.ink60 }}>ຍອດຄົງເຫຼືອ {fmtKip(r["ຍອດຄົງເຫຼືອ"])}</p>
+                </div>
+                <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: `${bucketColor[r["ກຸ່ມໜີ້ NPL"]]}1A`, color: bucketColor[r["ກຸ່ມໜີ້ NPL"]] }}>ຄ້າງ {r["ຄ້າງຊຳລະ(ວັນ)"]} ວັນ</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border p-5" style={{ borderColor: "#E4DCC9", background: C.white }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <p className="text-sm font-bold" style={{ color: C.ink }}>ລາຍງານສິນເຊື່ອທັງໝົດ ({allRows.length} ສັນຍາ)</p>
+          <ExportButtons rows={allRows} filenameBase="loan-portfolio-report" label="ລາຍງານສິນເຊື່ອທັງໝົດ" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Dashboards ---------- */
+function AdminPanel({ users, applications, onUpdateUser }) {
+  const [q, setQ] = useState("");
+  const filtered = users.filter((u) => u.name.toLowerCase().includes(q.toLowerCase()) || u.contact.toLowerCase().includes(q.toLowerCase()));
+  const counts = users.reduce((a, u) => ((a[u.role] = (a[u.role] || 0) + 1), a), {});
+  const appCounts = applications.reduce((a, x) => ((a[x.status] = (a[x.status] || 0) + 1), a), {});
+  return (
+    <div className="p-6 space-y-5 max-w-5xl mx-auto w-full">
+      <div><h1 className="text-xl font-bold" style={{ color: C.ink }}>ພາບລວມລະບົບ</h1><p className="text-sm" style={{ color: C.ink60 }}>ຜູ້ໃຊ້ ແລະ ຄຳຮ້ອງກູ້ເງິນທັງໝົດ</p></div>
+      <div className="flex gap-3 flex-wrap">
+        <StatCard label="ຜູ້ດູແລລະບົບ" value={counts.admin || 0} color={C.gold} icon={ShieldCheck} />
+        <StatCard label="ພະນັກງານສິນເຊື່ອ" value={counts.officer || 0} color={C.river} icon={Briefcase} />
+        <StatCard label="ລູກຄ້າ" value={counts.customer || 0} color={C.success} icon={UserIcon} />
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        <StatCard label="ຄຳຮ້ອງລໍຖ້າ" value={appCounts.pending || 0} color={C.gold} icon={Clock} />
+        <StatCard label="ອະນຸມັດແລ້ວ" value={appCounts.approved || 0} color={C.river} icon={ThumbsUp} />
+        <StatCard label="ຈ່າຍເງິນແລ້ວ" value={appCounts.disbursed || 0} color={C.success} icon={Banknote} />
+      </div>
+
+      <ReportsSection applications={applications} />
+
+      <div className="rounded-xl border" style={{ borderColor: "#E4DCC9", background: C.white }}>
+        <div className="p-4 border-b flex items-center gap-2" style={{ borderColor: "#E4DCC9" }}><Search size={15} style={{ color: C.ink40 }} /><input placeholder="ຄົ້ນຫາຊື່ ຫຼື ອີເມວ/ເບີໂທ..." value={q} onChange={(e) => setQ(e.target.value)} className="flex-1 text-sm outline-none" style={{ color: C.ink }} /></div>
+        <div className="divide-y" style={{ borderColor: "#E4DCC9" }}>
+          {filtered.map((u) => (
+            <div key={u.id} className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
+              <div className="min-w-[160px]"><p className="text-sm font-semibold" style={{ color: C.ink }}>{u.name}</p><p className="text-xs font-mono-ui" style={{ color: C.ink40 }}>{u.contact}</p></div>
+              <select value={u.role} onChange={(e) => onUpdateUser(u.id, { role: e.target.value })} className="text-xs font-semibold rounded-lg px-2.5 py-1.5 border outline-none" style={{ borderColor: "#D9D0BC", color: C.ink }}>
+                <option value="admin">ຜູ້ດູແລລະບົບ</option><option value="officer">ພະນັກງານສິນເຊື່ອ</option><option value="customer">ລູກຄ້າ</option>
+              </select>
+              <button onClick={() => onUpdateUser(u.id, { status: u.status === "active" ? "suspended" : "active" })} className="text-xs font-semibold rounded-full px-3 py-1.5 flex items-center gap-1" style={{ background: u.status === "active" ? `${C.success}1A` : `${C.danger}1A`, color: u.status === "active" ? C.success : C.danger }}>
+                {u.status === "active" ? <Check size={12} /> : <X size={12} />}{u.status === "active" ? "ໃຊ້ງານໄດ້" : "ຖືກລະງັບ"}
+              </button>
+            </div>
+          ))}
+          {filtered.length === 0 && <p className="text-sm text-center py-6" style={{ color: C.ink40 }}>ບໍ່ພົບຜູ້ໃຊ້</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OfficerPanel({ user, users, applications, onUpdateApp, onRecordPayment }) {
+  const [payingApp, setPayingApp] = useState(null);
+  const customerCount = users.filter((u) => u.role === "customer").length;
+  const pending = applications.filter((a) => a.status === "pending").length;
+  return (
+    <div className="p-6 space-y-5 max-w-3xl mx-auto w-full">
+      <div><h1 className="text-xl font-bold" style={{ color: C.ink }}>ສະບາຍດີ, {user.name}</h1><p className="text-sm" style={{ color: C.ink60 }}>ພະນັກງານສິນເຊື່ອ — ພາບລວມການເຮັດວຽກ</p></div>
+      <div className="flex gap-3 flex-wrap">
+        <StatCard label="ລູກຄ້າໃນລະບົບ" value={customerCount} color={C.river} icon={Users} />
+        <StatCard label="ຄຳຮ້ອງລໍຖ້າ" value={pending} color={C.gold} icon={Clock} />
+        <StatCard label="ດອກເບ້ຍ/ຮອກເບ້ຍ" value="Flat & Effective" color={C.success} icon={TrendingDown} />
+      </div>
+      <NotificationsPanel applications={applications} />
+      <div><p className="text-sm font-bold mb-3" style={{ color: C.ink }}>ຄິວຄຳຮ້ອງກູ້ເງິນ</p><ApplicationsQueue applications={applications} users={users} onUpdateApp={onUpdateApp} onOpenPayment={setPayingApp} /></div>
+      <ComingSoon items={[]} />
+      {payingApp && <PaymentModal app={payingApp} onClose={() => setPayingApp(null)} onRecord={onRecordPayment} />}
+    </div>
+  );
+}
+
+function CustomerPanel({ user, applications, onSaveKyc, onSubmitApp }) {
+  const myApps = applications.filter((a) => a.customerId === user.id).sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+  const myNotifs = computeNotifications(myApps);
+  return (
+    <div className="p-6 space-y-5 max-w-2xl mx-auto w-full">
+      <div><h1 className="text-xl font-bold" style={{ color: C.ink }}>ສະບາຍດີ, {user.name}</h1><p className="text-sm" style={{ color: C.ink60 }}>ບັນຊີຂອງທ່ານພ້ອມນຳໃຊ້ແລ້ວ</p></div>
+      {myNotifs.map((n) => (
+        <div key={n.appId + n.installmentNo} className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: n.kind === "overdue" ? `${C.danger}14` : `${C.gold}14`, color: n.kind === "overdue" ? C.danger : C.ink }}>
+          <Bell size={15} />
+          {n.kind === "overdue" ? `ທ່ານຄ້າງຊຳລະງວດ ${n.installmentNo} ມາແລ້ວ ${n.daysLate} ວັນ (${fmtKip(n.amount)})` : `ງວດ ${n.installmentNo} ຄົບກຳນົດອີກ ${n.daysLeft} ວັນ (${fmtKip(n.amount)})`}
+        </div>
+      ))}
+      <KycForm user={user} onSave={onSaveKyc} />
+      <div>
+        <p className="text-sm font-bold mb-3" style={{ color: C.ink }}>ຄຳຮ້ອງກູ້ຂອງຂ້ອຍ</p>
+        <div className="space-y-3">
+          <LoanApplicationForm onSubmit={onSubmitApp} hasKyc={!!user.kyc} />
+          {myApps.map((app) => (
+            <ApplicationCard key={app.id} app={app}>
+              {app.status === "disbursed" ? <AmortizationTable app={app} editable={false} /> :
+                app.status === "rejected" ? <p className="text-sm" style={{ color: C.danger }}>ຄຳຮ້ອງນີ້ຖືກປະຕິເສດ</p> :
+                app.status === "approved" ? <p className="text-sm" style={{ color: C.river }}>ອະນຸມັດແລ້ວ ອັດຕາ {app.annualRate}%/ປີ — ລໍຖ້າຈ່າຍເງິນກູ້</p> :
+                <p className="text-sm" style={{ color: C.ink60 }}>ລໍຖ້າພະນັກງານກວດສອບ</p>}
+            </ApplicationCard>
+          ))}
+          {myApps.length === 0 && <p className="text-sm text-center py-2" style={{ color: C.ink40 }}>ທ່ານຍັງບໍ່ມີຄຳຮ້ອງກູ້ເງິນ</p>}
+        </div>
+      </div>
+      <ComingSoon items={[]} />
+    </div>
+  );
+}
+
+/* ---------- App ---------- */
+function App() {
+  const [users, setUsers] = useState(null);
+  const [applications, setApplications] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [initializing, setInitializing] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [uList, aList] = await Promise.all([loadUsers(), loadApplications()]);
+      setUsers(uList); setApplications(aList);
+      const session = await loadSession();
+      if (session) { const u = uList.find((x) => x.id === session.userId); if (u) setCurrentUser(u); }
+      setInitializing(false);
+    })();
+  }, []);
+
+  const handleLogin = useCallback(async (contact, password) => {
+    setBusy(true); setError("");
+    await new Promise((r) => setTimeout(r, 350));
+    if (contact === "__google_demo__") { const demo = users.find((u) => u.id === "u_customer"); setCurrentUser(demo); await saveSession(demo.id); setBusy(false); return; }
+    const found = users.find((u) => u.contact.toLowerCase() === contact.toLowerCase() && u.password === password);
+    if (!found) setError("ອີເມວ/ເບີໂທ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ");
+    else if (found.status !== "active") setError("ບັນຊີນີ້ຖືກລະງັບ, ກະລຸນາຕິດຕໍ່ຜູ້ດູແລລະບົບ");
+    else { setCurrentUser(found); await saveSession(found.id); }
+    setBusy(false);
+  }, [users]);
+
+  const handleRegister = useCallback(async ({ name, contact, contactType, password }) => {
+    if (users.some((u) => u.contact.toLowerCase() === contact.toLowerCase())) { setError("ອີເມວ/ເບີໂທນີ້ຖືກໃຊ້ແລ້ວ"); return; }
+    setBusy(true);
+    const newUser = { id: "u_" + Date.now(), name, contact, contactType, password, role: "customer", status: "active", createdAt: new Date().toISOString().slice(0, 10), kyc: null };
+    const updated = [...users, newUser]; setUsers(updated); await saveUsers(updated);
+    setCurrentUser(newUser); await saveSession(newUser.id); setBusy(false);
+  }, [users]);
+
+  const handleUpdateUser = useCallback(async (id, patch) => {
+    const updated = users.map((u) => (u.id === id ? { ...u, ...patch } : u));
+    setUsers(updated); await saveUsers(updated);
+    if (currentUser?.id === id) setCurrentUser({ ...currentUser, ...patch });
+  }, [users, currentUser]);
+
+  const handleSaveKyc = useCallback((kyc) => { handleUpdateUser(currentUser.id, { kyc }); }, [currentUser, handleUpdateUser]);
+
+  const handleSubmitApp = useCallback(async (data) => {
+    const newApp = { id: "a_" + Date.now(), customerId: currentUser.id, customerName: currentUser.name, ...data, status: "pending", submittedAt: new Date().toISOString().slice(0, 10), annualRate: null, disbursedAt: null, paidCount: 0, reviewNote: "", payments: [] };
+    const updated = [newApp, ...applications]; setApplications(updated); await saveApplications(updated);
+  }, [applications, currentUser]);
+
+  const handleUpdateApp = useCallback(async (id, patch) => {
+    const updated = applications.map((a) => (a.id === id ? { ...a, ...patch } : a));
+    setApplications(updated); await saveApplications(updated);
+  }, [applications]);
+
+  const handleRecordPayment = useCallback(async (appId, payment) => {
+    const updated = applications.map((a) => (a.id === appId ? { ...a, paidCount: (a.paidCount || 0) + 1, payments: [...(a.payments || []), payment] } : a));
+    setApplications(updated); await saveApplications(updated);
+  }, [applications]);
+
+  const handleLogout = useCallback(async () => { setCurrentUser(null); await clearSession(); }, []);
+
+  if (initializing) {
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: C.sand }}><style>{FONT_IMPORT}</style><Loader2 className="animate-spin" style={{ color: C.ink }} /></div>;
+  }
+
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      <style>{FONT_IMPORT}</style>
+      {!currentUser ? (
+        <AuthScreen users={users} onLogin={handleLogin} onRegister={handleRegister} error={error} setError={setError} busy={busy} />
+      ) : (
+        <div style={{ background: C.sand, minHeight: "100vh" }}>
+          <TopBar user={currentUser} onLogout={handleLogout} />
+          {currentUser.role === "admin" && <AdminPanel users={users} applications={applications} onUpdateUser={handleUpdateUser} />}
+          {currentUser.role === "officer" && <OfficerPanel user={currentUser} users={users} applications={applications} onUpdateApp={handleUpdateApp} onRecordPayment={handleRecordPayment} />}
+          {currentUser.role === "customer" && <CustomerPanel user={currentUser} applications={applications} onSaveKyc={handleSaveKyc} onSubmitApp={handleSubmitApp} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
